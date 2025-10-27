@@ -8,6 +8,7 @@ import numpy as np
 import os
 import sys
 import tensorflow as tf
+from tensorflow.keras import regularizers
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Flatten, Dense, Dropout
 from tensorflow.keras.optimizers import SGD, Adam, RMSprop 
@@ -71,9 +72,10 @@ def get_bwt(taskMatrix):
     return sumCount / (numTasks-1)
 
 def l1_l2_loss(y_true, y_pred):
-    mae = tf.reduce_mean(tf.abs(y_true - y_pred))
-    mse = tf.reduce_mean(tf.square(y_true - y_pred))
-    return mae + mse
+    ce = tf.keras.losses.sparse_categorical_crossentropy(y_true, y_pred)
+    l1 = tf.add_n([tf.reduce_sum(tf.abs(w)) for w in model.trainable_weights])
+    l2 = tf.add_n([tf.reduce_sum(tf.square(w)) for w in model.trainable_weights])
+    return ce + 1e-5 * l1 + 1e-4 * l2
 
 model = Sequential([
     Flatten(input_shape=(28, 28)),
@@ -82,8 +84,13 @@ model = Sequential([
     Dense(10, activation='softmax'),  
 ])
 
+hiddenLay = 2
+optChoice = "RMSprop"
+lossChoice = "NLL"
+dropRate = 0.5
+
 #function to make the model
-def make_mlp(input_shape=(28, 28), hidden_layers=2, activation='sigmoid', output_units=10, optimizerChoice = "Adam", loss_choice = "NLL", dropout_rate = 0):
+def make_mlp(input_shape=(28, 28), hidden_layers=hiddenLay, activation='sigmoid', output_units=10, optimizerChoice = optChoice, loss_choice = lossChoice, dropout_rate = dropRate):
     model = Sequential()
     model.add(Flatten(input_shape=input_shape))
 
@@ -106,12 +113,16 @@ def make_mlp(input_shape=(28, 28), hidden_layers=2, activation='sigmoid', output
 
     #choose the loss (default, NLL)
     if loss_choice == "L1+L2":
-        loss_fn = l1_l2_loss
+        reg = regularizers.L1L2(l1=1e-5, l2=1e-4)
+        loss_fn = 'sparse_categorical_crossentropy'
     elif loss_choice == "L1":
-        loss_fn = tf.keras.losses.MeanAbsoluteError()
+        reg = regularizers.L1(1e-5)
+        loss_fn = 'sparse_categorical_crossentropy'
     elif loss_choice == "L2":
-        loss_fn = tf.keras.losses.MeanSquaredError()
+        reg = regularizers.L2(1e-4)
+        loss_fn = 'sparse_categorical_crossentropy'
     else:
+        reg = None
         loss_fn = 'sparse_categorical_crossentropy'
 	
     #compile the model
@@ -126,7 +137,7 @@ def make_mlp(input_shape=(28, 28), hidden_layers=2, activation='sigmoid', output
 taskMatrix = np.zeros((num_tasks_to_run, num_tasks_to_run))
 
 #actually initiate the model:
-model = make_mlp( hidden_layers=2, optimizerChoice="Adam", loss_choice= "NLL"   )
+model = make_mlp( hidden_layers=2, optimizerChoice="Adam", loss_choice= "L1"   )
 
 #create a loop to go through the permuted data
 for i, (x_train, y_train, x_test, y_test) in enumerate(permuted_datasets):
@@ -152,5 +163,7 @@ for i, (x_train, y_train, x_test, y_test) in enumerate(permuted_datasets):
 #get performance metrics
 finalACC = get_acc(taskMatrix)
 finalBWT = get_bwt(taskMatrix)
+
+np.savetxt(f"MLP_hl{hiddenLay}_opt{optChoice}_loss{lossChoice}_withDropout.csv", taskMatrix, delimiter=",")
 
 print(f"The final ACC is {finalACC}, and the final BWT is {finalBWT}.")
